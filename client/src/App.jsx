@@ -11,10 +11,7 @@ import PharmacistDashboard from './pages/PharmacistDashboard';
 const ProtectedRoute = ({ children }) => {
   const { user, loading } = useAuth();
 
-  console.log('🔒 ProtectedRoute - user:', user, 'loading:', loading);
-
   if (loading) {
-    console.log('⏳ ProtectedRoute: Showing loading spinner');
     return (
       <div className="min-h-screen bg-gray-100 dark:bg-gray-900 flex items-center justify-center">
         <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-blue-600"></div>
@@ -23,11 +20,9 @@ const ProtectedRoute = ({ children }) => {
   }
 
   if (!user) {
-    console.log('🚫 ProtectedRoute: No user, redirecting to auth');
     return <Navigate to="/auth" replace />;
   }
 
-  console.log('✅ ProtectedRoute: User authenticated, rendering children');
   return children;
 };
 
@@ -44,9 +39,6 @@ const RoleBasedRoute = ({ children, allowedRoles }) => {
 const AppRoutes = () => {
   const { user, loading } = useAuth();
 
-  // Debug: Log routing state
-  console.log('🚦 AppRoutes - user:', user, 'loading:', loading);
-
   const getDashboardComponent = () => {
     switch (user?.role) {
       case 'PATIENT':
@@ -62,7 +54,6 @@ const AppRoutes = () => {
 
   // Show loading spinner while checking authentication
   if (loading) {
-    console.log('⏳ Showing loading spinner');
     return (
       <div className="min-h-screen bg-gray-100 dark:bg-gray-900 flex items-center justify-center">
         <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-blue-600"></div>
@@ -76,15 +67,9 @@ const AppRoutes = () => {
         path="/" 
         element={
           user ? (
-            (() => {
-              console.log('🏠 Redirecting authenticated user from root to dashboard');
-              return <Navigate to="/dashboard" replace />;
-            })()
+            <Navigate to="/dashboard" replace />
           ) : (
-            (() => {
-              console.log('🏠 Showing homepage for unauthenticated user');
-              return <HomePage />;
-            })()
+            <HomePage />
           )
         } 
       />
@@ -92,12 +77,11 @@ const AppRoutes = () => {
         path="/auth" 
         element={
           user ? (
-            (() => {
-              console.log('🔄 Redirecting authenticated user to dashboard');
-              return <Navigate to="/dashboard" replace />;
-            })()
+            <Navigate to="/dashboard" replace />
           ) : (
-            (() => {
+            <AuthPage />
+          )
+        }
               console.log('📝 Showing auth page for unauthenticated user');
               return <AuthPage />;
             })()

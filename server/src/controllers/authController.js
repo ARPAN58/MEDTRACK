@@ -2,9 +2,10 @@
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcrypt');
 const User = require('../model/User');
+const logger = require('../utils/logger');
+const { AppError, asyncHandler } = require('../middleware/errorHandler');
 
-const {JWT_SECRET} = require('../../constant');
-const JWT_EXPIRES_IN = '30d'; // 30 days
+const { JWT_SECRET, JWT_EXPIRES_IN, REFRESH_TOKEN_EXPIRES_IN, BCRYPT_ROUNDS } = require('../../constant');
 
 const signToken = (user) =>
   jwt.sign(
@@ -13,91 +14,86 @@ const signToken = (user) =>
     { expiresIn: JWT_EXPIRES_IN }
   );
 
-// POST /auth/signup
-exports.signup = async (req, res) => {
-  try {
-    console.log('📝 Signup request received:', req.body);
-    const { name, phone, email, aadhaar, password, role } = req.body;
-    if (!name || !phone || !email || !aadhaar || !password) {
-      console.log('❌ Missing required fields');
-      return res.status(400).json({ message: 'Missing required fields' });
-    } 
-    const user = new User({ name, phone, email, aadhaar, password, role }); 
-    const saltRounds = Number(process.env.BCRYPT_ROUNDS || 10); 
-    const salt = await bcrypt.genSalt(saltRounds); 
-    user.password = await bcrypt.hash(password, salt);
+const signRefreshToken = (user) =>
+  jwt.sign(
+    { sub: user._id.toString() },
+    JWT_SECRET,
+    { expiresIn: REFRESH_TOKEN_EXPIRES_IN }
+  );
 
-    await user.save(); 
-    console.log('✅ User created successfully:', user.medTrackId);
+// POST /api/v1/auth/signup
+exports.signup = asyncHandler(async (req, res) => {
+  const { name, phone, email, aadhaar, password, role } = req.body;
 
-    const token = signToken(user);
+  logger.info(`Signup attempt for email: ${email}`);
 
-    return res.status(201).json({
-      message: 'Signup successful',
-      token,
-      user: {
-        id: user._id,
-        name: user.name,
-        email: user.email,
-        phone: user.phone,
-        role: user.role,
-        medTrackId: user.medTrackId,
-        createdAt: user.createdAt,
-      },
-    }); 
-  } catch (err) {
-    console.error('❌ Signup error:', err);
-    if (err.code === 11000) {
-      const field = Object.keys(err.keyPattern || err.keyValue || {})[0] || 'field';
-      return res.status(409).json({ message: `Duplicate ${field}` });
-    }
-    console.log(err)
-    return res.status(500).json({ message: 'Server error' });
+  const user = new User({ name, phone, email, aadhaar, password, role });
+  const salt = await bcrypt.genSalt(BCRYPT_ROUNDS);
+  user.password = await bcrypt.hash(password, salt);
+
+  await user.save();
+  logger.info(`User created successfully: ${user.medTrackId}`);
+
+  const token = signToken(user);
+  const refreshToken = signRefreshToken(user);
+
+  return res.status(201).json({
+    success: true,
+    message: 'Signup successful',
+    token,
+    refreshToken,
+    user: {
+      id: user._id,
+      name: user.name,
+      email: user.email,
+      phone: user.phone,
+      role: user.role,
+      medTrackId: user.medTrackId,
+      createdAt: user.createdAt,
+    },
+  });
+});
+
+// POST /api/v1/auth/login
+exports.login = asyncHandler(async (req, res) => {
+  const { identifier, password } = req.body;
+
+  logger.info(`Login attempt for: ${identifier}`);
+
+  const query = identifier.includes('@') ? { email: identifier } : { phone: identifier };
+  const user = await User.findOne(query).select('+password');
+
+  if (!user) {
+    logger.warn(`Login failed: User not found for ${identifier}`);
+    throw new AppError('Invalid credentials', 401);
   }
-};
 
-// POST /auth/login
-// identifier can be email or phone
-exports.login = async (req, res) => {
-  try {
-    console.log('🔐 Login request received for:', req.body.identifier);
-    const { identifier, password } = req.body;
-    if (!identifier || !password) {
-      console.log('❌ Missing credentials');
-      return res.status(400).json({ message: 'Missing credentials' });
-    }
+  const isPasswordValid = await bcrypt.compare(password, user.password);
+  if (!isPasswordValid) {
+    logger.warn(`Login failed: Invalid password for ${identifier}`);
+    throw new AppError('Invalid credentials', 401);
+  }
 
-    const query = identifier.includes('@') ? { email: identifier } : { phone: identifier };
-    const user = await User.findOne(query).select('+password');
+  const token = signToken(user);
+  const refreshToken = signRefreshToken(user);
+  logger.info(`Login successful for: ${user.medTrackId}`);
 
-    if (!user) {
-      console.log('❌ User not found');
-      return res.status(400).json({ message: 'Invalid credentials' });
-    }
-
-    const ok = await bcrypt.compare(password, user.password);
-    if (!ok) {
-      console.log('❌ Invalid password');
-      return res.status(400).json({ message: 'Invalid credentials' });
-    }
-
-    const token = signToken(user);
-    console.log('✅ Login successful for:', user.medTrackId);
-
-    return res.json({
-      message: 'Login successful',
-      token,
-      user: {
-        id: user._id,
-        name: user.name,
-        email: user.email,
-        phone: user.phone,
-        role: user.role,
-        medTrackId: user.medTrackId,
-        createdAt: user.createdAt,
-      },
-    });
-  } catch (err) {
+  return res.json({
+    success: true,
+    message: 'Login successful',
+    token,
+    refreshToken,
+    user: {
+      id: user._id,
+      name: user.name,
+      email: user.email,
+      phone: user.phone,
+      role: user.role,
+      medTrackId: user.medTrackId,
+      createdAt: user.createdAt,
+    },
+  });
+});
     console.error('❌ Login error:', err);
     return res.status(500).json({ message: 'Server error' });
   }

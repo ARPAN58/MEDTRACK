@@ -19,7 +19,8 @@ export const AuthProvider = ({ children }) => {
     return saved ? JSON.parse(saved) : true;
   });
 
-  const API_BASE_URL = 'https://medtrack-i6zm.onrender.com';
+  // Get API base URL from environment or use default
+  const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000';
 
   useEffect(() => {
     const token = localStorage.getItem('token');
@@ -41,19 +42,12 @@ export const AuthProvider = ({ children }) => {
     }
   }, [darkMode]);
 
-  // Debug: Log user state changes
-  useEffect(() => {
-    console.log('🔄 User state changed:', user);
-  }, [user]);
-
   const verifyToken = async () => {
     try {
-      console.log('🔍 Verifying token...');
       const response = await axios.get(`${API_BASE_URL}/user/profile`);
-      console.log('✅ Token verified successfully:', response.data);
       setUser(response.data.user);
     } catch (error) {
-      console.error('❌ Token verification failed:', error.response?.data || error.message);
+      console.error('Token verification failed:', error.response?.data?.message || error.message);
       localStorage.removeItem('token');
       delete axios.defaults.headers.common['Authorization'];
     } finally {
@@ -63,45 +57,41 @@ export const AuthProvider = ({ children }) => {
 
   const login = async (identifier, password) => {
     try {
-      console.log('🔐 Attempting login for:', identifier);
-      const response = await axios.post(`${API_BASE_URL}/api/auth/login`, {
+      const response = await axios.post(`${API_BASE_URL}/api/v1/auth/login`, {
         identifier,
         password,
       });
       
-      console.log('✅ Login successful:', response.data);
       const { token, user: userData } = response.data;
       localStorage.setItem('token', token);
       axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
       setUser(userData);
-      console.log('👤 User state set:', userData);
       return { success: true };
     } catch (error) {
-      console.error('❌ Login failed:', error.response?.data || error.message);
+      const message = error.response?.data?.message || error.response?.data?.details?.[0]?.message || 'Login failed. Please try again.';
       return { 
         success: false, 
-        message: error.response?.data?.message || 'Login failed' 
+        message,
+        details: error.response?.data?.details
       };
     }
   };
 
   const signup = async (userData) => {
     try {
-      console.log('📝 Attempting signup for:', userData.email);
-      const response = await axios.post(`${API_BASE_URL}/api/auth/signup`, userData);
+      const response = await axios.post(`${API_BASE_URL}/api/v1/auth/signup`, userData);
       
-      console.log('✅ Signup successful:', response.data);
       const { token, user: newUser } = response.data;
       localStorage.setItem('token', token);
       axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
       setUser(newUser);
-      console.log('👤 User state set:', newUser);
       return { success: true };
     } catch (error) {
-      console.error('❌ Signup failed:', error.response?.data || error.message);
+      const message = error.response?.data?.message || error.response?.data?.details?.[0]?.message || 'Signup failed. Please try again.';
       return { 
         success: false, 
-        message: error.response?.data?.message || 'Signup failed' 
+        message,
+        details: error.response?.data?.details
       };
     }
   };

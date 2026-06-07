@@ -1,20 +1,30 @@
 // middleware/auth.js
 const jwt = require('jsonwebtoken');
-const {JWT_SECRET} = require('../../constant')
+const logger = require('../utils/logger');
+const { JWT_SECRET } = require('../../constant');
 
 function auth(required = true) {
   return (req, res, next) => {
     const authHeader = req.headers.authorization || '';
 
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return required
-        ? res.status(401).json({ message: 'Authorization header must start with Bearer' })
-        : next();
+      if (required) {
+        logger.warn('Missing or invalid Authorization header');
+        return res.status(401).json({ 
+          success: false,
+          message: 'Authorization header must start with Bearer' 
+        });
+      }
+      return next();
     }
 
     const token = authHeader.substring('Bearer '.length).trim();
     if (!token) {
-      return res.status(401).json({ message: 'Bearer token missing' });
+      logger.warn('Bearer token missing');
+      return res.status(401).json({ 
+        success: false,
+        message: 'Bearer token missing' 
+      });
     }
 
     try {
@@ -22,7 +32,11 @@ function auth(required = true) {
       req.user = decoded;
       return next();
     } catch (err) {
-      return res.status(401).json({ message: 'Invalid or expired token' });
+      logger.warn(`Token verification failed: ${err.message}`);
+      return res.status(401).json({ 
+        success: false,
+        message: 'Invalid or expired token' 
+      });
     }
   };
 }

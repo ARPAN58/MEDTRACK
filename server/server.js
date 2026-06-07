@@ -1,71 +1,103 @@
 // server.js
 const express = require('express');
 const cors = require('cors');
+const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
 const bodyParser = require('body-parser');
 
 const auth = require('./src/middleware/auth');
+const { errorHandler } = require('./src/middleware/errorHandler');
+const logger = require('./src/utils/logger');
 const userRoutes = require('./src/routes/user');
 const authRoutes = require('./src/routes/auth');
 const doctorRoutes = require('./src/routes/doctor');
 const pharmacyRoutes = require('./src/routes/pharmacist');
 
-const { PORT, FRONTEND_URL } = require('./constant.js');
+const { PORT, ALLOWED_ORIGINS, NODE_ENV } = require('./constant.js');
 const { ConnectDB } = require('./src/db/connection');
 
 const app = express();
 
-app.use(express.json());
-app.use(express.json({ limit: '2mb' }));              
-app.use(express.urlencoded({ extended: true }));     
-// app.use(cors({ origin: FRONTEND_URL || 'https://med-track-kohl.vercel.app/' })); 
-// server.js
-const allowedOrigins = [
-  'https://med-track-kohl.vercel.app',   // production FE
-  'http://localhost:5173',               // local FE
-];
+// ===== SECURITY MIDDLEWARE =====
+// Helmet - Set security HTTP headers
+app.use(helmet());
 
+// Rate limiting for auth endpoints
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 5, // 5 requests per window
+  message: 'Too many signup/login attempts, please try again later',
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+const generalLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 100,
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+// Body parsers
+app.use(express.json({ limit: '2mb' }));
+app.use(express.urlencoded({ extended: true, limit: '2mb' }));
+
+// CORS with origin validation
 app.use(cors({
   origin: function (origin, callback) {
-    // Allow non-browser requests (no Origin) and allowed origins
-    if (!origin || allowedOrigins.includes(origin)) return callback(null, true);
+    if (!origin || ALLOWED_ORIGINS.includes(origin)) return callback(null, true);
     return callback(new Error('Not allowed by CORS'));
-  }, // dynamic allowlist [web:411]
-  credentials: true, // if cookies/credentials are used; safe with explicit origins [web:222]
-  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'], // preflight methods [web:213]
-  allowedHeaders: ['Content-Type', 'Authorization', 'Accept'],   // preflight headers [web:222]
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'Accept'],
   optionsSuccessStatus: 200,
 }));
 
-// // Optional: handle preflight explicitly (cors() already does this)
-// app.options('*', cors()); // ensure preflight answers with matching ACAO [web:213]
-
-
+// General request logging
 app.use((req, res, next) => {
-  console.log(`${new Date().toISOString()} - ${req.method} ${req.path}`);
+  logger.http(`${req.method} ${req.path}`);
   next();
 });
 
-// Routes
-app.use('/api', authRoutes);
+// Apply rate limiting
+app.use('/api/auth/', authLimiter);
+app.use(generalLimiter);
+
+// ===== ROUTES =====
+app.use('/api/v1', authRoutes);
 app.use('/user', userRoutes);
 app.use('/doctor', doctorRoutes);
 app.use('/pharmacy', pharmacyRoutes);
 
-// 404 fallback without '*' pattern (avoid path-to-regexp error)
+// Health check endpoint
+app.get('/health', (req, res) => {
+  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
+// 404 handler
 app.use((req, res) => {
-  res.status(404).json({ message: 'Not found' });
+  res.status(404).json({ success: false, message: 'Endpoint not found' });
 });
 
-// Centralized error handler (optional)
-app.use((err, req, res, next) => {
-  console.error(err);
-  if (err.message === 'Not allowed by CORS') {
-    return res.status(403).json({ message: 'CORS blocked: origin not allowed' });
-  }
-  res.status(500).json({ message: 'Server error' });
+// Global error handler
+app.use(errorHandler);
+
+// ===== DATABASE & SERVER =====
+ConnectDB().catch((err) => {
+  logger.error('Database connection failed:', err);
+  process.exit(1);
 });
 
-app.listen(PORT, () => {
-  console.log(`Server is running on port ${PORT}`);
-  ConnectDB();
+const server = app.listen(PORT, () => {
+  logger.info(`Server started on port ${PORT} in ${NODE_ENV} mode`);
+});
+
+// Graceful shutdown
+process.on('SIGTERM', () => {
+  logger.info('SIGTERM received, shutting down gracefully');
+  server.close(() => {
+    logger.info('Server closed');
+    process.exit(0);
+  });
 });
